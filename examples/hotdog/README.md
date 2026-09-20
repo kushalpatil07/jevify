@@ -2,6 +2,10 @@
 
 The SeeFood app from Silicon Valley, on jevify. One image, one question, one forward pass.
 
+<p align="center"><img src="media/not-hotdog.gif" width="300" alt="Not Hotdog demo"></p>
+
+([mp4](media/not-hotdog.mp4), 20 s)
+
 ```bash
 uv run --extra transformers python examples/hotdog/app.py --model kushalpatil/jevify-gemma4-e4b
 open http://127.0.0.1:8000
