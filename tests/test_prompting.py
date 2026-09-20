@@ -49,3 +49,17 @@ def test_supports_packed_detects_sliding_layers():
     assert supports_packed(SimpleNamespace(layer_types=None, sliding_window=None))
     assert supports_packed(SimpleNamespace(layer_types=["full_attention"] * 4, sliding_window=None))
     assert not supports_packed(SimpleNamespace(layer_types=["sliding_attention", "full_attention"], sliding_window=1024))
+
+
+def test_image_state_becomes_image_blocks():
+    r = render({"image": "https://example.com/a.png", "ticket": 7}, Noul("Is there a dog?"))
+    user = r.messages[1]["content"]
+    assert isinstance(user, list)
+    assert user[0] == {"type": "image", "image": "https://example.com/a.png"}
+    assert user[1]["type"] == "text"
+    assert user[1]["text"].startswith("<state>\n[image 1 attached]\n{\n  \"ticket\": 7\n}\n</state>")
+    # a bare URL / data URL as the whole state also works
+    r2 = render("data:image/png;base64,AAAA", Noul("q"))
+    assert r2.messages[1]["content"][0]["type"] == "image"
+    # plain text state is untouched
+    assert isinstance(render("hello", Noul("q")).messages[1]["content"], str)

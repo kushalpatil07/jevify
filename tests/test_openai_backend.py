@@ -84,3 +84,13 @@ def test_concurrency_fans_out_and_preserves_order():
     assert len(out) == 6 and all(nt.logprobs["A"] == math.log(0.6) for nt in out)
     assert seen[0]["chat_template_kwargs"] == {"enable_thinking": False}  # vllm no-think preset
 
+
+
+def test_images_become_image_url_blocks_for_openai_servers():
+    client, seen = fake_server({"Yes": 0.7, "No": 0.3})
+    jev = Jevify(OpenAICompatBackend(model="m", runtime="vllm", client=client))
+    out = jev.system_one({"image": "https://example.com/cat.jpg"}, {"dog": Noul("Is there a dog?")})
+    assert out["answers"]["dog"]["noul"] == 0.7
+    user = seen[0]["messages"][1]["content"]
+    assert user[0] == {"type": "image_url", "image_url": {"url": "https://example.com/cat.jpg"}}
+    assert user[1]["type"] == "text"

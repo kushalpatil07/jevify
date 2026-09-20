@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-transformers = ["torch>=2.4", "transformers>=4.46", "accelerate>=1.0"]
+transformers = ["torch>=2.4", "torchvision>=0.19", "transformers>=4.46", "accelerate>=1.0", "pillow>=10"]
 train = ["torch>=2.4", "transformers>=4.46", "accelerate>=1.0", "peft>=0.14", "datasets>=3.0", "numpy"]
 
 [project.urls]
