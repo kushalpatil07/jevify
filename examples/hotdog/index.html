@@ -11,9 +11,22 @@
   header { width:100%; padding:14px 18px; display:flex; align-items:center; justify-content:space-between; font-weight:700; letter-spacing:.5px; }
   header small { font-weight:400; opacity:.6; }
   #stage { position:relative; width:min(92vw, 560px); aspect-ratio:3/4; background:#000; border-radius:18px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.6); }
-  #stage video, #stage img { width:100%; height:100%; object-fit:cover; display:block; }
-  #banner { position:absolute; left:0; right:0; top:0; padding:16px; text-align:center; font-size:38px; font-weight:900; letter-spacing:1px; text-transform:uppercase; transform:translateY(-110%); transition:transform .25s ease; }
-  #banner.show { transform:none; }
+  #stage video { width:100%; height:100%; object-fit:cover; display:block; }
+  #stage img { width:100%; height:100%; object-fit:contain; display:block; background:#000; }
+  #stage.scanning img, #stage.scanning video { filter:saturate(.6) brightness(.85); }
+  #scan { position:absolute; inset:0; pointer-events:none; display:none; }
+  #stage.scanning #scan { display:block; }
+  #scan .line { position:absolute; left:0; right:0; height:3px; background:#7CFC00; box-shadow:0 0 18px 6px rgba(124,252,0,.55); animation:sweep 1.1s ease-in-out infinite; }
+  #scan .grid { position:absolute; inset:0; background-image:linear-gradient(rgba(124,252,0,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(124,252,0,.12) 1px, transparent 1px); background-size:40px 40px; }
+  #scan .label { position:absolute; left:0; right:0; bottom:22%; text-align:center; font:700 15px/1 monospace; letter-spacing:3px; color:#7CFC00; text-shadow:0 0 10px rgba(124,252,0,.8); animation:blink 1s steps(2) infinite; }
+  @keyframes sweep { 0% { top:0 } 50% { top:calc(100% - 3px) } 100% { top:0 } }
+  @keyframes blink { 50% { opacity:.25 } }
+  #banner { position:absolute; left:0; right:0; top:0; padding:18px; text-align:center; font-size:40px; font-weight:900; letter-spacing:1px; text-transform:uppercase; transform:translateY(-110%); box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  #banner.show { animation:drop .55s cubic-bezier(.2,1.4,.4,1) forwards; }
+  @keyframes drop { 0% { transform:translateY(-110%) } 100% { transform:none } }
+  #stage.flash-yes { animation:flashg .5s ease-out; } #stage.flash-no { animation:flashr .5s ease-out; }
+  @keyframes flashg { 0% { box-shadow:0 0 0 0 rgba(39,174,96,.9), 0 20px 60px rgba(0,0,0,.6) } 100% { box-shadow:0 0 0 30px rgba(39,174,96,0), 0 20px 60px rgba(0,0,0,.6) } }
+  @keyframes flashr { 0% { box-shadow:0 0 0 0 rgba(192,57,43,.9), 0 20px 60px rgba(0,0,0,.6) } 100% { box-shadow:0 0 0 30px rgba(192,57,43,0), 0 20px 60px rgba(0,0,0,.6) } }
   #banner.yes { background:var(--green); } #banner.no { background:var(--red); }
   #meter { position:absolute; left:0; right:0; bottom:0; padding:12px 16px 14px; background:linear-gradient(transparent, rgba(0,0,0,.85)); font-size:14px; }
   #bar { height:10px; border-radius:6px; background:#333; overflow:hidden; margin:6px 0 8px; }
@@ -25,8 +38,9 @@
   button.secondary, label.btn.secondary { background:#2a2a2a; color:#fff; }
   input[type=file] { display:none; }
   #live.on { background:var(--green); color:#fff; }
-  #samples { display:flex; gap:8px; width:min(92vw, 560px); overflow-x:auto; padding:4px 0 8px; }
-  #samples img { width:72px; height:72px; object-fit:cover; border-radius:10px; cursor:pointer; opacity:.85; border:2px solid transparent; flex:0 0 auto; }
+  #samples { display:flex; gap:12px; width:min(92vw, 560px); overflow-x:auto; padding:6px 0 10px; }
+  #samples img { width:132px; height:132px; object-fit:cover; border-radius:14px; cursor:pointer; opacity:.85; border:3px solid transparent; flex:0 0 auto; transition:transform .15s; }
+  #samples img:hover { transform:scale(1.04); }
   #samples img:hover, #samples img.sel { opacity:1; border-color:#fff; }
 </style>
 </head>
@@ -37,6 +51,7 @@
   <div id="drop">Drop a photo here, upload one, or start the camera.</div>
   <video id="video" autoplay playsinline muted hidden></video>
   <img id="photo" hidden alt="">
+  <div id="scan"><div class="grid"></div><div class="line"></div><div class="label">EVALUATING</div></div>
   <div id="banner"></div>
   <div id="meter" hidden>
     <div><b id="ptext">P(hot dog) = –</b> <span id="ms" style="float:right;opacity:.6"></span></div>
@@ -59,10 +74,16 @@ const $ = id => document.getElementById(id);
 const video = $("video"), photo = $("photo"), banner = $("banner"), meter = $("meter"), fill = $("fill");
 let stream = null, liveTimer = null, busy = false;
 
+const stage = $("stage");
+function startScan() { banner.className = ""; meter.hidden = true; stage.classList.add("scanning"); }
 function show(res) {
-  const p = res.hotdog;
-  banner.textContent = res.verdict === "HOTDOG" ? "Hotdog ✅" : "Not hotdog ❌";
-  banner.className = "show " + (res.verdict === "HOTDOG" ? "yes" : "no");
+  const p = res.hotdog, yes = res.verdict === "HOTDOG";
+  stage.classList.remove("scanning");
+  banner.textContent = yes ? "Hotdog ✅" : "Not hotdog ❌";
+  banner.className = "";            // restart the drop animation even if the class was already set
+  void banner.offsetWidth;
+  banner.className = "show " + (yes ? "yes" : "no");
+  stage.classList.remove("flash-yes", "flash-no"); void stage.offsetWidth; stage.classList.add(yes ? "flash-yes" : "flash-no");
   meter.hidden = false;
   $("ptext").textContent = `P(hot dog) = ${p.toFixed(3)}`;
   $("ms").textContent = `${res.ms} ms · ${res.input_tokens} tokens`;
@@ -72,11 +93,17 @@ function show(res) {
   $("actually").textContent = (res.verdict === "HOTDOG" ? "" : "Actually: ") + top;
 }
 
-async function classify(blob) {
+async function classify(blob, { animate = true } = {}) {
   if (busy) return; busy = true;
   const fd = new FormData(); fd.append("file", blob, "frame.jpg");
-  try { const r = await fetch("/classify", { method: "POST", body: fd }); show(await r.json()); }
-  catch (e) { banner.textContent = "server error"; banner.className = "show no"; }
+  const t0 = performance.now();
+  if (animate) startScan();
+  try {
+    const r = await fetch("/classify", { method: "POST", body: fd });
+    const res = await r.json();
+    if (animate) await new Promise(ok => setTimeout(ok, Math.max(0, 1400 - (performance.now() - t0))));  // let the scan play
+    show(res);
+  } catch (e) { stage.classList.remove("scanning"); banner.textContent = "server error"; banner.className = "show no"; }
   busy = false;
 }
 
@@ -121,7 +148,7 @@ function stopLive() { if (liveTimer) { clearInterval(liveTimer); liveTimer = nul
 $("live").onclick = () => {
   if (liveTimer) return stopLive();
   $("live").classList.add("on"); $("live").textContent = "Live (stop)";
-  liveTimer = setInterval(async () => { if (!busy) classify(await frameBlob()); }, 400);
+  liveTimer = setInterval(async () => { if (!busy) classify(await frameBlob(), { animate: false }); }, 400);
 };
 </script>
 </body>
