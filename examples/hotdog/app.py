@@ -23,14 +23,10 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from jevify import Choice, Jevify, Noul  # noqa: E402
 
-FOODS = ["hot dog", "corn dog", "sausage without bun", "hamburger", "sub sandwich", "pizza", "burrito", "taco", "sushi", "salad", "ice cream", "banana", "an animal", "not food", "something else"]
+FOODS = ["hot dog", "hamburger", "pizza", "sandwich", "burrito", "taco", "sushi", "salad", "fruit", "dessert", "not food"]
 QUESTIONS = {
-    "hotdog": Noul(
-        "Is this a hot dog?",
-        {"true": "a sausage served in a sliced hot dog bun, toppings allowed",
-         "false": "anything else: a corn dog, a sausage with no bun, a sub or any other sandwich, a burger, or something that is not food"},
-    ),
-    "food": Choice("What is shown in the image?", {f: None for f in FOODS}),
+    "hotdog": Noul("Is this a hot dog?"),
+    "food": Choice("What is this?", {f: None for f in FOODS}),
 }
 
 app = FastAPI(title="Not Hotdog")
