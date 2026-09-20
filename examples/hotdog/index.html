@@ -14,14 +14,15 @@
   #stage { position:relative; flex:1 1 auto; min-height:0; width:min(92vw, 760px); background:#000; border-radius:18px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.6); }
   #stage video { width:100%; height:100%; object-fit:cover; display:block; }
   #stage img { width:100%; height:100%; object-fit:contain; display:block; background:#000; }
-  #stage.scanning img, #stage.scanning video { filter:saturate(.6) brightness(.85); }
-  #scan { position:absolute; inset:0; pointer-events:none; display:none; }
-  #stage.scanning #scan { display:block; }
-  #scan .line { position:absolute; left:0; right:0; height:3px; background:#7CFC00; box-shadow:0 0 18px 6px rgba(124,252,0,.55); animation:sweep 1.1s ease-in-out infinite; }
-  #scan .grid { position:absolute; inset:0; background-image:linear-gradient(rgba(124,252,0,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(124,252,0,.12) 1px, transparent 1px); background-size:40px 40px; }
-  #scan .label { position:absolute; left:0; right:0; bottom:22%; text-align:center; font:700 15px/1 monospace; letter-spacing:3px; color:#7CFC00; text-shadow:0 0 10px rgba(124,252,0,.8); animation:blink 1s steps(2) infinite; }
-  @keyframes sweep { 0% { top:0 } 50% { top:calc(100% - 3px) } 100% { top:0 } }
-  @keyframes blink { 50% { opacity:.25 } }
+  #stage.scanning img, #stage.scanning video { filter:brightness(.55); }
+  #scan { position:absolute; inset:0; pointer-events:none; display:none; align-items:center; justify-content:center; }
+  #stage.scanning #scan { display:flex; }
+  .ring { position:absolute; border-radius:50%; border:4px dotted #a259ff; box-shadow:0 0 14px rgba(162,89,255,.55); }
+  .ring.r1 { width:120px; height:120px; animation:spin 1.6s linear infinite; }
+  .ring.r2 { width:180px; height:180px; border-color:#c084fc; animation:spin 2.4s linear infinite reverse; }
+  .ring.r3 { width:240px; height:240px; border-color:#7c3aed; animation:spin 3.4s linear infinite; }
+  .ring.r4 { width:300px; height:300px; border-color:#d8b4fe; border-width:3px; animation:spin 5s linear infinite reverse; opacity:.7; }
+  @keyframes spin { to { transform:rotate(360deg) } }
   #banner { position:absolute; left:0; right:0; top:0; padding:18px; text-align:center; font-size:40px; font-weight:900; letter-spacing:1px; text-transform:uppercase; transform:translateY(-110%); box-shadow:0 8px 30px rgba(0,0,0,.5); }
   #banner.show { animation:drop .55s cubic-bezier(.2,1.4,.4,1) forwards; }
   @keyframes drop { 0% { transform:translateY(-110%) } 100% { transform:none } }
@@ -52,7 +53,7 @@
   <div id="drop">Drop a photo here, upload one, or start the camera.</div>
   <video id="video" autoplay playsinline muted hidden></video>
   <img id="photo" hidden alt="">
-  <div id="scan"><div class="grid"></div><div class="line"></div><div class="label">EVALUATING</div></div>
+  <div id="scan"><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="ring r4"></div></div>
   <div id="banner"></div>
   <div id="meter" hidden>
     <div><b id="ptext">P(hot dog) = –</b> <span id="ms" style="float:right;opacity:.6"></span></div>
