@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not Hotdog</title>
+<style>
+  :root { --green:#27ae60; --red:#c0392b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system, Helvetica, Arial, sans-serif; background:#111; color:#fff; min-height:100vh; display:flex; flex-direction:column; align-items:center; }
+  header { width:100%; padding:14px 18px; display:flex; align-items:center; justify-content:space-between; font-weight:700; letter-spacing:.5px; }
+  header small { font-weight:400; opacity:.6; }
+  #stage { position:relative; width:min(92vw, 560px); aspect-ratio:3/4; background:#000; border-radius:18px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+  #stage video, #stage img { width:100%; height:100%; object-fit:cover; display:block; }
+  #banner { position:absolute; left:0; right:0; top:0; padding:16px; text-align:center; font-size:38px; font-weight:900; letter-spacing:1px; text-transform:uppercase; transform:translateY(-110%); transition:transform .25s ease; }
+  #banner.show { transform:none; }
+  #banner.yes { background:var(--green); } #banner.no { background:var(--red); }
+  #meter { position:absolute; left:0; right:0; bottom:0; padding:12px 16px 14px; background:linear-gradient(transparent, rgba(0,0,0,.85)); font-size:14px; }
+  #bar { height:10px; border-radius:6px; background:#333; overflow:hidden; margin:6px 0 8px; }
+  #fill { height:100%; width:0; background:var(--red); transition:width .25s ease, background .25s ease; }
+  #actually { opacity:.9; }
+  #drop { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; color:#aaa; font-size:18px; }
+  .controls { display:flex; gap:10px; margin:16px 0 30px; flex-wrap:wrap; justify-content:center; }
+  button, label.btn { background:#fff; color:#111; border:0; border-radius:999px; padding:12px 18px; font-weight:700; font-size:15px; cursor:pointer; }
+  button.secondary, label.btn.secondary { background:#2a2a2a; color:#fff; }
+  input[type=file] { display:none; }
+  #live.on { background:var(--green); color:#fff; }
+  #samples { display:flex; gap:8px; width:min(92vw, 560px); overflow-x:auto; padding:4px 0 8px; }
+  #samples img { width:72px; height:72px; object-fit:cover; border-radius:10px; cursor:pointer; opacity:.85; border:2px solid transparent; flex:0 0 auto; }
+  #samples img:hover, #samples img.sel { opacity:1; border-color:#fff; }
+</style>
+</head>
+<body>
+<header><span>🌭 Not Hotdog</span><small>jevify · gemma4-e4b · one forward pass</small></header>
+
+<div id="stage">
+  <div id="drop">Drop a photo here, upload one, or start the camera.</div>
+  <video id="video" autoplay playsinline muted hidden></video>
+  <img id="photo" hidden alt="">
+  <div id="banner"></div>
+  <div id="meter" hidden>
+    <div><b id="ptext">P(hot dog) = –</b> <span id="ms" style="float:right;opacity:.6"></span></div>
+    <div id="bar"><div id="fill"></div></div>
+    <div id="actually"></div>
+  </div>
+</div>
+
+<div id="samples" title="try one"></div>
+
+<div class="controls">
+  <label class="btn">📷 Upload<input id="file" type="file" accept="image/*" capture="environment"></label>
+  <button id="cam" class="secondary">Start camera</button>
+  <button id="snap" class="secondary" hidden>Classify frame</button>
+  <button id="live" class="secondary" hidden>Live</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const video = $("video"), photo = $("photo"), banner = $("banner"), meter = $("meter"), fill = $("fill");
+let stream = null, liveTimer = null, busy = false;
+
+function show(res) {
+  const p = res.hotdog;
+  banner.textContent = res.verdict === "HOTDOG" ? "Hotdog ✅" : "Not hotdog ❌";
+  banner.className = "show " + (res.verdict === "HOTDOG" ? "yes" : "no");
+  meter.hidden = false;
+  $("ptext").textContent = `P(hot dog) = ${p.toFixed(3)}`;
+  $("ms").textContent = `${res.ms} ms · ${res.input_tokens} tokens`;
+  fill.style.width = (p * 100).toFixed(1) + "%";
+  fill.style.background = p >= 0.5 ? "var(--green)" : "var(--red)";
+  const top = res.food_top3.map(([k, v]) => `${k} ${(v * 100).toFixed(0)}%`).join(" · ");
+  $("actually").textContent = (res.verdict === "HOTDOG" ? "" : "Actually: ") + top;
+}
+
+async function classify(blob) {
+  if (busy) return; busy = true;
+  const fd = new FormData(); fd.append("file", blob, "frame.jpg");
+  try { const r = await fetch("/classify", { method: "POST", body: fd }); show(await r.json()); }
+  catch (e) { banner.textContent = "server error"; banner.className = "show no"; }
+  busy = false;
+}
+
+function frameBlob() {
+  return new Promise(res => {
+    const c = document.createElement("canvas");
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext("2d").drawImage(video, 0, 0);
+    c.toBlob(res, "image/jpeg", 0.85);
+  });
+}
+
+fetch("/api/samples").then(r => r.json()).then(names => {
+  for (const n of names) {
+    const im = document.createElement("img"); im.src = "/samples/" + n; im.title = n;
+    im.onclick = async () => {
+      document.querySelectorAll("#samples img").forEach(x => x.classList.remove("sel")); im.classList.add("sel");
+      stopLive(); if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; video.hidden = true; }
+      photo.src = im.src; photo.hidden = false; $("drop").hidden = true;
+      classify(await (await fetch(im.src)).blob());
+    };
+    $("samples").appendChild(im);
+  }
+});
+
+$("file").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  stopLive(); if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; video.hidden = true; }
+  photo.src = URL.createObjectURL(f); photo.hidden = false; $("drop").hidden = true;
+  classify(f);
+};
+document.body.addEventListener("dragover", e => e.preventDefault());
+document.body.addEventListener("drop", e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { $("file").files = e.dataTransfer.files; $("file").onchange({ target: { files: [f] } }); } });
+
+$("cam").onclick = async () => {
+  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+  video.srcObject = stream; video.hidden = false; photo.hidden = true; $("drop").hidden = true;
+  $("snap").hidden = false; $("live").hidden = false;
+};
+$("snap").onclick = async () => classify(await frameBlob());
+function stopLive() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; $("live").classList.remove("on"); $("live").textContent = "Live"; } }
+$("live").onclick = () => {
+  if (liveTimer) return stopLive();
+  $("live").classList.add("on"); $("live").textContent = "Live (stop)";
+  liveTimer = setInterval(async () => { if (!busy) classify(await frameBlob()); }, 400);
+};
+</script>
+</body>
+</html>

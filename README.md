@@ -77,6 +77,7 @@ res = jev.system_one(state, {
 
 State can be a string, a JSON object, or an image (`{"image": "photo.jpg"}`, a URL, a data URL).
 For the official SDK, set `TYPESAFE_BASE_URL=http://localhost:8000` and `TYPESAFE_API_KEY=local`.
+Image demo: [examples/hotdog](examples/hotdog), the Not Hotdog app, with a live camera mode.
 
 ## How it works
 
