@@ -7,10 +7,11 @@
 <style>
   :root { --green:#27ae60; --red:#c0392b; }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system, Helvetica, Arial, sans-serif; background:#111; color:#fff; min-height:100vh; display:flex; flex-direction:column; align-items:center; }
-  header { width:100%; padding:14px 18px; display:flex; align-items:center; justify-content:space-between; font-weight:700; letter-spacing:.5px; }
+  html, body { height:100%; }
+  body { margin:0; font-family:-apple-system, Helvetica, Arial, sans-serif; background:#111; color:#fff; height:100vh; display:flex; flex-direction:column; align-items:center; overflow:hidden; }
+  header { width:100%; padding:10px 18px; display:flex; align-items:center; justify-content:space-between; font-weight:700; letter-spacing:.5px; flex:0 0 auto; }
   header small { font-weight:400; opacity:.6; }
-  #stage { position:relative; width:min(92vw, 560px); aspect-ratio:3/4; background:#000; border-radius:18px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+  #stage { position:relative; flex:1 1 auto; min-height:0; width:min(92vw, 760px); background:#000; border-radius:18px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.6); }
   #stage video { width:100%; height:100%; object-fit:cover; display:block; }
   #stage img { width:100%; height:100%; object-fit:contain; display:block; background:#000; }
   #stage.scanning img, #stage.scanning video { filter:saturate(.6) brightness(.85); }
@@ -33,13 +34,13 @@
   #fill { height:100%; width:0; background:var(--red); transition:width .25s ease, background .25s ease; }
   #actually { opacity:.9; }
   #drop { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; color:#aaa; font-size:18px; }
-  .controls { display:flex; gap:10px; margin:16px 0 30px; flex-wrap:wrap; justify-content:center; }
-  button, label.btn { background:#fff; color:#111; border:0; border-radius:999px; padding:12px 18px; font-weight:700; font-size:15px; cursor:pointer; }
+  .controls { display:flex; gap:10px; margin:6px 0 12px; flex-wrap:wrap; justify-content:center; flex:0 0 auto; }
+  button, label.btn { background:#fff; color:#111; border:0; border-radius:999px; padding:10px 16px; font-weight:700; font-size:14px; cursor:pointer; }
   button.secondary, label.btn.secondary { background:#2a2a2a; color:#fff; }
   input[type=file] { display:none; }
   #live.on { background:var(--green); color:#fff; }
-  #samples { display:flex; gap:12px; width:min(92vw, 560px); overflow-x:auto; padding:6px 0 10px; }
-  #samples img { width:132px; height:132px; object-fit:cover; border-radius:14px; cursor:pointer; opacity:.85; border:3px solid transparent; flex:0 0 auto; transition:transform .15s; }
+  #samples { display:flex; gap:10px; width:min(92vw, 760px); overflow-x:auto; padding:10px 0 6px; flex:0 0 auto; }
+  #samples img { width:96px; height:96px; object-fit:cover; border-radius:12px; cursor:pointer; opacity:.85; border:3px solid transparent; flex:0 0 auto; transition:transform .15s; }
   #samples img:hover { transform:scale(1.04); }
   #samples img:hover, #samples img.sel { opacity:1; border-color:#fff; }
 </style>
