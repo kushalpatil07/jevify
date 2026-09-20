@@ -18,11 +18,9 @@ CUDA_VISIBLE_DEVICES=0 uv run python train/train_lora.py --model google/gemma-4-
 
 # 4. evaluate anything jevify can talk to (raw model, adapter, Ollama model...)
 uv run python train/eval.py --data data/heldout.jsonl --backend transformers --model google/gemma-4-26B-A4B-it --adapter runs/g26/adapter_best
-uv run python train/eval.py --data data/heldout.jsonl --runtime ollama --model kushalpatil/jevify-gemma4-26b-a4b
 
-# 5. publish
-uv run python train/export.py push --base google/gemma-4-26B-A4B-it --adapter runs/g26/adapter_best --repo kushalpatil/jevify-gemma4-26b-a4b
-uv run python train/export.py ollama --merged runs/g26/merged --name kushalpatil/jevify-gemma4-26b-a4b --push
+# 5. publish merged weights + adapter to Hugging Face
+uv run python train/export.py --base google/gemma-4-26B-A4B-it --adapter runs/g26/adapter_best --repo kushalpatil/jevify-gemma4-26b-a4b
 ```
 
 ## What the model learns

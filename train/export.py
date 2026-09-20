@@ -1,16 +1,11 @@
-"""Publish a trained model: merge the LoRA, push to Hugging Face, and build an Ollama model.
+"""Publish a trained model: merge the LoRA and push merged weights (+ adapter) to Hugging Face.
 
-  # merge + push (run on the training box; needs `hf auth login` or HF_TOKEN)
-  uv run --extra train python train/export.py push --base google/gemma-4-E4B-it --adapter runs/e4b/adapter_best \
+  uv run --extra train python train/export.py --base google/gemma-4-E4B-it --adapter runs/e4b/adapter_best \
       --repo kushalpatil/jevify-gemma4-e4b --results runs/e4b/ood.txt
-
-  # build + (optionally) push the Ollama model from the merged safetensors
-  uv run --extra train python train/export.py ollama --merged runs/e4b/merged --name kushalpatil/jevify-gemma4-e4b [--push]
 """
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
@@ -32,13 +27,13 @@ Nothing is generated: one prefill, read the next-token distribution over the ans
 ## Use
 
 ```bash
-ollama pull {repo}
-jevify serve --runtime ollama --model {repo}      # POST /v1/systemone
+pip install "jevify[transformers] @ git+https://github.com/kushalpatil07/jevify"
+jevify serve --model {repo}                     # POST /v1/systemone, Jev wire format
 ```
 
 ```python
 from jevify import Jevify, Noul, Choice, Score
-jev = Jevify.from_transformers("{repo}")        # or Jevify.from_runtime("ollama", "{repo}")
+jev = Jevify.from_transformers("{repo}")        # or serve it with vLLM and use Jevify.from_runtime("vllm", "{repo}")
 jev.system_one("Help! My payouts have been failing for 3 days.", {{
     "urgent": Noul("Does this convey urgency?"),
     "team":   Choice("Which team should handle this?", {{"billing": None, "technical": None, "sales": None}}),
@@ -60,11 +55,6 @@ No teacher model. Recipe: `train/` in the jevify repo.
 """
 
 
-def run(cmd, **kw):
-    print("+", " ".join(map(str, cmd)), file=sys.stderr)
-    subprocess.run(cmd, check=True, **kw)
-
-
 def cmd_push(a):
     import torch
     from huggingface_hub import HfApi
@@ -78,6 +68,12 @@ def cmd_push(a):
         model = PeftModel.from_pretrained(base, a.adapter).merge_and_unload()
         model.save_pretrained(merged, safe_serialization=True)
         AutoTokenizer.from_pretrained(a.base).save_pretrained(merged)
+    try:  # keep the image processor for multimodal bases
+        from transformers import AutoProcessor
+
+        AutoProcessor.from_pretrained(a.base).save_pretrained(merged)
+    except Exception:
+        pass
     results = Path(a.results).read_text() if a.results else "see repo README"
     (merged / "README.md").write_text(CARD.format(base=a.base, repo=a.repo, results=f"```\n{results}\n```"))
     api = HfApi()
@@ -89,33 +85,16 @@ def cmd_push(a):
     print(f"pushed https://huggingface.co/{a.repo}", file=sys.stderr)
 
 
-def cmd_ollama(a):
-    modelfile = Path(a.merged) / "Modelfile"
-    modelfile.write_text(f"FROM {Path(a.merged).resolve()}\nPARAMETER num_ctx {a.num_ctx}\nPARAMETER temperature 0\n")
-    run(["ollama", "create", a.name, "-f", str(modelfile)])
-    if a.push:
-        run(["ollama", "push", a.name])
-
 
 def main():
-    ap = argparse.ArgumentParser()
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("push")
+    p = argparse.ArgumentParser()
     p.add_argument("--base", required=True)
     p.add_argument("--adapter", required=True)
     p.add_argument("--merged", default=None, help="merged dir (default: <adapter>/../merged; created if missing)")
     p.add_argument("--repo", required=True, help="HF repo id, e.g. kushalpatil/jevify-gemma4-e4b")
     p.add_argument("--results", default=None, help="text file pasted into the model card")
     p.add_argument("--private", action="store_true")
-    p.set_defaults(fn=cmd_push)
-    o = sub.add_parser("ollama")
-    o.add_argument("--merged", required=True)
-    o.add_argument("--name", required=True)
-    o.add_argument("--num-ctx", type=int, default=32768)
-    o.add_argument("--push", action="store_true")
-    o.set_defaults(fn=cmd_ollama)
-    a = ap.parse_args()
-    a.fn(a)
+    cmd_push(p.parse_args())
 
 
 if __name__ == "__main__":

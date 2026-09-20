@@ -11,10 +11,10 @@ from .questions import Choice, Noul, Score
 
 
 def _add_backend_args(p: argparse.ArgumentParser):
-    p.add_argument("--model", required=True, help="model name as the runtime knows it (e.g. gemma4:e4b) or an HF repo id for --backend transformers")
-    p.add_argument("--runtime", default="ollama", choices=sorted(RUNTIME_PRESETS), help="which local server you're running (sets base-url default)")
-    p.add_argument("--base-url", default=None, help="override the OpenAI-compatible base URL, e.g. http://host:11434/v1")
-    p.add_argument("--backend", default="openai", choices=["openai", "transformers"], help="'openai' = talk to a running server (default); 'transformers' = load the model in-process")
+    p.add_argument("--model", default="kushalpatil/jevify-gemma4-e4b", help="HF repo id (default backend) or the model name your server knows")
+    p.add_argument("--backend", default="transformers", choices=["transformers", "openai"], help="'transformers' = load the model in-process (default); 'openai' = talk to a running OpenAI-compatible server (vLLM, SGLang, llama.cpp, ...)")
+    p.add_argument("--runtime", default="vllm", choices=sorted(RUNTIME_PRESETS), help="with --backend openai: which server you're running (sets base-url default)")
+    p.add_argument("--base-url", default=None, help="with --backend openai: override the base URL, e.g. http://host:8000/v1")
     p.add_argument("--api-key", default="local")
     p.add_argument("--think", action="store_true", help="leave reasoning/thinking on (default: off)")
     p.add_argument("--extra-body", default=None, help="JSON merged into every chat/completions request")

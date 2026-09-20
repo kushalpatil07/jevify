@@ -318,6 +318,12 @@ def main():
         merged = PeftModel.from_pretrained(base, out / "adapter_best").merge_and_unload()
         merged.save_pretrained(out / "merged", safe_serialization=True)
         tok.save_pretrained(out / "merged")
+        try:  # multimodal bases (Gemma 4): keep the image processor so the merged model stays multimodal
+            from transformers import AutoProcessor
+
+            AutoProcessor.from_pretrained(args.model).save_pretrained(out / "merged")
+        except Exception as e:  # text-only base
+            log("no_processor", error=str(e)[:120])
         log("merged", path=str(out / "merged"))
 
 
