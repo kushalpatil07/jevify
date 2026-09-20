@@ -173,12 +173,9 @@ subjectivity; 307 items):
 | 26B jevified | 0.834 | 0.875 | 0.061 | 0.450 | 0.241 |
 | Jev 1.13 | 0.866 | 0.879 | 0.037 | 0.387 | 0.197 |
 
-On the training distribution the jevified models beat Jev on every metric. On unseen datasets Jev is
+On unseen datasets Jev is
 ahead by 2 to 3 accuracy points and on NLL; the gap is concentrated in paraphrase detection (PAWS),
 where our models score 0.54 to 0.58 against Jev's 0.86. On the other five datasets they are even.
-
-Training used text only. On CIFAR-10 and Food-101 images the 26B moved from 0.999 to 0.93
-confidence at 98% accuracy. Jev does not take images.
 
 ## Models
 
@@ -208,14 +205,7 @@ Add your own rows to the same file, one JSON object per line:
 {"state": "...", "question": {"type": "choice", "instructions": "...", "criteria": {"a": "...", "b": null}}, "target": {"a": 0.8, "b": 0.2}, "split": "train", "source": "mine"}
 ```
 
-Untried changes that should help, in order:
-
-1. Paraphrase and NLI pairs. The models lose most on PAWS, where two sentences differ by a word.
-2. One epoch. Early checkpoints scored slightly better on the unseen datasets than the final ones.
-3. Lower learning rate for the 26B. Its gradient norms were spiky at 1e-4.
-4. A few hundred rows from your own task. Generic calibration gives "0.8 means about 80%" on
-   average; your rows give it for your questions.
-5. Several questions per state per training step, using the batched forward from inference.
+Training setup is pretty naive. By smart training you should be easily be able to beat Jev. 
 
 Details of each script and data source: [train/README.md](train/README.md).
 
