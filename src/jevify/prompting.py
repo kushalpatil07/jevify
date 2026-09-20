@@ -16,6 +16,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from .images import is_image_ref
 from .questions import Choice, Noul, Question, Score
 
 SYSTEM_PROMPT = "You are a precise classifier. Reply with a single token: only the label of your answer."
@@ -25,19 +26,40 @@ LETTERS = [chr(ord("A") + i) for i in range(26)]
 
 @dataclass(frozen=True)
 class Rendered:
-    messages: list[dict[str, str]]
+    messages: list[dict[str, Any]]  # user content is a str, or a list of image/text blocks when the state has images
     labels: list[str]  # what the model should emit, e.g. ["A", "B", "C"]
     keys: list[str]  # what each label means to the user, same order
 
 
-def render_state(state: Any) -> str:
-    if not isinstance(state, str):
-        state = json.dumps(state, indent=2, ensure_ascii=False)
-    return f"<state>\n{state}\n</state>\n\n"
+def split_state(state: Any) -> tuple[Any, list[Any]]:
+    """Pull image references out of the state. Images can be the whole state, or live under
+    an "image" / "images" key of a dict; the rest of the dict stays as text."""
+    if is_image_ref(state):
+        return None, [state]
+    if isinstance(state, list) and state and all(is_image_ref(x) for x in state):
+        return None, list(state)
+    if isinstance(state, dict):
+        images = []
+        rest = {}
+        for k, v in state.items():
+            if k in ("image", "images") and (is_image_ref(v) or (isinstance(v, list) and v and all(is_image_ref(x) for x in v))):
+                images += v if isinstance(v, list) else [v]
+            else:
+                rest[k] = v
+        return (rest or None), images
+    return state, []
+
+
+def render_state(state: Any, n_images: int = 0) -> str:
+    parts = [f"[image {i + 1} attached]" for i in range(n_images)] if n_images else []
+    if state is not None:
+        parts.append(state if isinstance(state, str) else json.dumps(state, indent=2, ensure_ascii=False))
+    return "<state>\n" + "\n".join(parts) + "\n</state>\n\n"
 
 
 def render(state: Any, question: Question, system_prompt: str = SYSTEM_PROMPT) -> Rendered:
-    head = render_state(state) + question.instructions.strip() + "\n\n"
+    text_state, images = split_state(state)
+    head = render_state(text_state, len(images)) + question.instructions.strip() + "\n\n"
 
     if isinstance(question, Choice):
         keys = list(question.criteria)
@@ -63,8 +85,11 @@ def render(state: Any, question: Question, system_prompt: str = SYSTEM_PROMPT) -
     else:  # pragma: no cover
         raise TypeError(f"not a question: {question!r}")
 
+    user: Any = head + body
+    if images:  # image blocks first, then the text; backends turn these into their own format
+        user = [{"type": "image", "image": im} for im in images] + [{"type": "text", "text": head + body}]
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": head + body},
+        {"role": "user", "content": user},
     ]
     return Rendered(messages=messages, labels=labels, keys=keys)

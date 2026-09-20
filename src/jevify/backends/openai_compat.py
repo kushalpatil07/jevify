@@ -8,7 +8,19 @@ from __future__ import annotations
 
 import httpx
 
+from ..images import to_data_url
 from .base import NextToken
+
+
+def _openai_messages(messages):
+    """jevify image blocks -> OpenAI `image_url` blocks (data URLs for local images)."""
+    out = []
+    for m in messages:
+        c = m["content"]
+        if isinstance(c, list):
+            c = [({"type": "image_url", "image_url": {"url": to_data_url(b["image"])}} if b.get("type") == "image" else b) for b in c]
+        out.append({"role": m["role"], "content": c})
+    return out
 
 # Everything Ollama accepts today; other servers cap at 20 as well (OpenAI's limit).
 MAX_TOP_LOGPROBS = 20
@@ -61,7 +73,7 @@ class OpenAICompatBackend:
     def next_token(self, messages: list[dict[str, str]]) -> NextToken:
         body = {
             "model": self.model,
-            "messages": messages,
+            "messages": _openai_messages(messages),
             "max_tokens": 1,
             "temperature": 0,
             "logprobs": True,
