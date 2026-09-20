@@ -28,18 +28,20 @@ def _probs(ans):
     return ans["probabilities"] if "probabilities" in ans else {"yes": ans["noul"]}
 
 
-def test_packed_forward_matches_sequential_branches(backend):
+def test_batched_and_packed_match_sequential(backend):
     jev = Jevify(backend)
+    seq = {k: jev.system_one(STATE, {k: q}, debug=True)["answers"][k] for k, q in QS.items()}  # one question per call
     backend.packed = False
-    seq = jev.system_one(STATE, QS, debug=True)
+    branches = jev.system_one(STATE, QS, debug=True)
     backend.packed = True
     packed = jev.system_one(STATE, QS, debug=True)
     for k in QS:
-        a, b = _probs(seq["answers"][k]), _probs(packed["answers"][k])
-        for key in a:
-            assert a[key] == pytest.approx(b[key], abs=2e-3), (k, a, b)
-    # the second call found the whole state already in the KV cache
-    assert packed["usage"]["cached_tokens"] > 0
+        a = _probs(seq[k])
+        for name, res in (("branches", branches), ("packed", packed)):
+            b = _probs(res["answers"][k])
+            for key in a:
+                assert a[key] == pytest.approx(b[key], abs=2e-3), (name, k, a, b)
+    assert branches["usage"]["cached_tokens"] > 0 and packed["usage"]["cached_tokens"] > 0
 
 
 def test_answers_are_sane(backend):
