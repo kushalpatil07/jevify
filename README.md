@@ -1,22 +1,42 @@
-# Jevify
+<div align="center">
 
-**Turn any open-weight model into a Jev API.**
+<h1>Jevify</h1>
 
-One forward pass in, calibrated probabilities out. Works with any causal LM on Hugging Face and
-keeps whatever the base model can do: its full context window, images if it has a vision tower.
+<h3>Make any open-weight model into a Jev API.</h3>
 
-Jev is TypeSafe's API. You give it some state and a few typed questions, and it returns
-probabilities instead of text. Jevify does the same thing with a model you run yourself. The
-request and response format is the same, so the `typesafe-sdk` works against it without changes.
+<p>
+Keeps everything the base model has: its full context window (128k, 256k, 1M, whatever it ships with), image input, any architecture on Hugging Face.<br>
+Two trained models included, plus the full recipe and scripts to train your own.
+</p>
 
-It comes with two Gemma 4 models we trained to give good probabilities. Any other instruct model
-from Hugging Face works too, it will just be over-confident (more on that below).
+<p>
+<a href="https://huggingface.co/kushalpatil/jevify-gemma4-e4b"><img src="https://img.shields.io/badge/🤗%20model-jevify--gemma4--e4b-yellow" alt="E4B"></a>
+<a href="https://huggingface.co/kushalpatil/jevify-gemma4-26b-a4b"><img src="https://img.shields.io/badge/🤗%20model-jevify--gemma4--26b--a4b-yellow" alt="26B"></a>
+<a href="https://github.com/kushalpatil07/jevify/actions"><img src="https://github.com/kushalpatil07/jevify/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python">
+<img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
+</p>
 
-## Try it
+<p>
+<a href="#quick-start">Quick start</a> ·
+<a href="#how-it-works">How it works</a> ·
+<a href="#why-the-models-are-trained">Results</a> ·
+<a href="#models">Models</a> ·
+<a href="#train-your-own">Train your own</a>
+</p>
+
+</div>
+
+[Jev](https://docs.typesafe.ai/api) is TypeSafe's API: send state and typed questions, get
+probabilities back. Jevify serves the same request and response format from a model you run, so
+the `typesafe-sdk` works unchanged. Any causal LM from Hugging Face works; the two Gemma 4 models
+below are trained to give calibrated probabilities.
+
+## Quick start
 
 ```bash
 pip install "jevify[transformers] @ git+https://github.com/kushalpatil07/jevify"
-jevify serve --model kushalpatil/jevify-gemma4-e4b      # http://127.0.0.1:8000/v1/systemone
+jevify serve --model kushalpatil/jevify-gemma4-e4b      # POST http://127.0.0.1:8000/v1/systemone
 ```
 
 ```bash
@@ -31,16 +51,12 @@ curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
 ```
 
 ```json
-{"model": "kushalpatil/jevify-gemma4-e4b",
- "answers": {
-  "is_urgent":   {"type": "noul", "noul": 0.7311},
+{"answers": {
+  "is_urgent":   {"type": "noul",   "noul": 0.7311},
   "department":  {"type": "choice", "choice": "billing", "probabilities": {"billing": 0.8354, "technical": 0.1645, "sales": 0.0001}, "confidence": 0.5919},
-  "frustration": {"type": "score", "score": 0.5961, "legend": {"0": "calm", "1": "frustrated", "2": "very angry"},
-                  "probabilities": {"0": 0.4064, "1": 0.5912, "2": 0.0024}, "confidence": 0.3708}},
+  "frustration": {"type": "score",  "score": 0.5961, "probabilities": {"0": 0.4064, "1": 0.5912, "2": 0.0024}, "confidence": 0.3708}},
  "usage": {"input_tokens": 256, "output_tokens": 0}}
 ```
-
-From Python:
 
 ```python
 from jevify import Jevify, Noul, Choice, Score
@@ -51,27 +67,20 @@ res = jev.system_one(state, {
     "department":  Choice("Which team should handle this?", {"billing": None, "technical": None, "sales": None}),
     "frustration": Score("How frustrated is the customer?", ["calm", "frustrated", "very angry"]),
 })
-res["answers"]["department"]["probabilities"]
 ```
 
-The state can be a string, a JSON object, or an image (`{"image": "photo.jpg", "note": "..."}`,
-a URL, or a data URL). To use the official SDK, set `TYPESAFE_BASE_URL=http://localhost:8000` and
-`TYPESAFE_API_KEY=local`. `jevify ask --state "..." --choice "team: billing,technical,sales"` works
-from the shell.
-
-Three question types. You can mix them in one call.
-
-| type | you ask | you get |
+| type | question | answer |
 |---|---|---|
 | `noul` | is this true? | `P(yes)` |
-| `choice` | which of these? | a distribution over your options, plus a confidence |
-| `score` | how much, on these ordered levels? | a distribution over the levels, plus the expected level |
+| `choice` | which of these? | distribution over your options, confidence |
+| `score` | how much, on ordered levels? | distribution over levels, expected level |
+
+State can be a string, a JSON object, or an image (`{"image": "photo.jpg"}`, a URL, a data URL).
+For the official SDK, set `TYPESAFE_BASE_URL=http://localhost:8000` and `TYPESAFE_API_KEY=local`.
 
 ## How it works
 
-There is no text generation anywhere. Here is the whole trick.
-
-Each question is written as a small multiple-choice prompt after the state:
+Each question becomes a short multiple-choice prompt after the state:
 
 ```
 <state>
@@ -88,82 +97,62 @@ C. sales — pricing, upgrades
 Answer with the letter of the single best option.
 ```
 
-The model runs one forward pass. At the last position it has a distribution over its whole
-vocabulary for the next token. We take the probabilities of `A`, `B` and `C` out of it, renormalize
-them, and that is the answer. For `noul` the labels are `Yes` and `No`. For `score` the labels are
-letters for each level, and the score is the expected level index. Confidence is one minus the
-normalized entropy of the distribution. `output_tokens` is always 0.
+One forward pass. Read the next-token distribution at the last position, keep the entries for
+`A`, `B`, `C`, renormalize. `noul` uses `Yes`/`No`. `score` uses a letter per level and reports the
+expected level. Confidence is 1 minus normalized entropy. `output_tokens` is always 0.
 
-When you ask several questions about one state, the state is only processed once. The
-transformers backend prefills the state, keeps its KV cache, copies that cache once per question
-along the batch dimension, and runs all the question suffixes as one batched forward pass. Each row
-is "state + its question", so it is the same computation as asking one question at a time (we check
-that: in float32 the probabilities match to the last digit), just done together. Ten questions cost
-about one and a half questions:
+Several questions about one state cost one state prefill. The state's KV cache is computed once,
+copied per question along the batch dimension, and the question suffixes run as one batched forward:
 
 ```
-                        STATE  ──────►  KV cache (computed once)
-                                           │  copied N times
-                        row 1:  [ cache ] + Q1  ─┐
-                        row 2:  [ cache ] + Q2  ─┼─►  one forward  ─►  N answers
-                        row 3:  [ cache ] + Q3  ─┘
+STATE ──► KV cache (once)
+            row 1: [cache] + Q1 ─┐
+            row 2: [cache] + Q2 ─┼─► one forward ─► N answers
+            row 3: [cache] + Q3 ─┘
 ```
 
-For very long states, where N copies of the cache would not fit, models with full attention can
-instead pack the questions into one row with a tree-shaped mask (each question sees the state and
-itself, one shared copy of the cache). Server backends (vLLM, llama.cpp, ...) get the same effect
-from their own prompt cache when you send the questions concurrently.
+Each row is "state + its question", so the result equals asking one at a time (identical in float32).
+Full-attention models can instead pack the questions into one row with a tree-shaped mask, which
+shares a single cache copy for very long states. Server backends get the same effect from their
+prompt cache.
 
-Speed, measured on one B200 with plain Hugging Face transformers, no compilation, 1,700-token state
-already cached:
+B200, eager transformers, 1,700-token state cached:
 
 | | 1 question | 3 questions | 10 questions |
 |---|---|---|---|
 | jevify-gemma4-e4b | 40 ms | 48 ms | 76 ms |
 | jevify-gemma4-26b-a4b | 61 ms | 72 ms | 112 ms |
 
-Prefilling the 1,700-token state the first time adds about 10 ms on the E4B and 25 ms on the 26B.
-The 40 ms floor is Python overhead in eager transformers, not the GPU; vLLM or `torch.compile`
-would cut it. On a 24 GB M-series Mac (MPS) the E4B takes about 4.5 s to prefill the same state and
-then 0.3 s for a question.
+First prefill of that state adds 10 ms (E4B) or 25 ms (26B). The 40 ms floor is Python overhead;
+vLLM or `torch.compile` removes most of it. A 24 GB M-series Mac prefills the same state in 4.5 s and
+answers a question in 0.3 s.
 
-Because the model is just doing a normal forward pass, everything the base model supports still
-works. Gemma 4 E4B takes 128k tokens of state, the 26B takes 256k. Both have a vision tower, so an
-image can be the state and the questions are asked about the picture.
+Context and images come from the base model. Gemma 4 E4B takes 128k tokens, the 26B 256k, and both
+accept an image as the state.
 
-## Why raw models give bad probabilities
+## Why the models are trained
 
-A chat model's last layer is trained to pick the next token, not to say how sure it is. After
-instruction tuning and RLHF the distribution collapses. Ask a raw Gemma 4 which team should handle
-the payouts message above and it says `billing: 0.997`. Ask it something it has no way of knowing
-and it still says 0.99 for whatever it picks. The numbers look like probabilities but they are
-not.
+A chat model's output layer predicts the next token. It does not estimate how often it is right,
+and RLHF makes it say 0.99 for most answers. On 800 held-out items from 16 datasets:
 
-You can measure this. On 800 held-out items from 16 datasets:
-
-| | accuracy | average stated confidence |
+| | accuracy | stated confidence |
 |---|---|---|
 | Gemma 4 E4B, raw | 0.745 | 0.963 |
 | Gemma 4 26B-A4B, raw | 0.757 | 0.991 |
+| Jev 1.13 (API) | 0.756 | 0.872 |
 
-Right three times out of four, sure 99 times out of 100.
+We trained the output distribution directly: a LoRA on the attention layers, loss = KL between a
+target distribution and the model's distribution over the label tokens, at the position Jevify
+reads. No teacher model. Targets came from public classification sets with real labels (options
+subsetted, shuffled and reworded per row), from sets with several raters per item (go_emotions,
+measuring-hate-speech), and from constructed documents up to 24k tokens with known answers,
+including 50/50 and 75/25 cases.
 
-So we trained the output distribution directly. A LoRA on the attention layers, and the loss is
-the KL divergence between a target distribution and the model's distribution over the label
-tokens, at exactly the position Jevify reads. No teacher model. The targets come from three places:
+One run per model, 47k rows, 2 epochs, one GPU. ECE is the gap between stated confidence and
+accuracy. NLL and Brier are proper scoring rules, lower is better. Jev was run through its API on
+the same items; its probabilities are rounded to two decimals, so its NLL uses a 0.005 floor.
 
-- public classification datasets with real labels (banking77, clinc, ag_news, boolq, mnli, sst5, yelp, toxicchat, ...),
-  with the options subsetted, shuffled and reworded per example so the model can't memorize label sets or positions
-- datasets where several people labeled each item (go_emotions, measuring-hate-speech), which give a real
-  human distribution per item
-- long documents we construct ourselves, up to 24k tokens, where we know the answer because we
-  wrote it, including deliberately ambiguous ones with 50/50 or 75/25 targets
-
-One run each, about 47k examples, two epochs, one GPU. Here is what changed. ECE is the average gap
-between stated confidence and actual accuracy. NLL and Brier are proper scoring rules; lower is
-better and confident mistakes cost the most.
-
-Held-out rows from the training datasets (800 items):
+Held-out rows from the training sources (800 items):
 
 | | accuracy | confidence | ECE | NLL | Brier |
 |---|---|---|---|---|---|
@@ -171,9 +160,10 @@ Held-out rows from the training datasets (800 items):
 | E4B jevified | 0.823 | 0.823 | 0.028 | 0.438 | 0.193 |
 | 26B raw | 0.757 | 0.991 | 0.235 | 3.18 | 0.425 |
 | 26B jevified | 0.821 | 0.829 | 0.032 | 0.422 | 0.188 |
+| Jev 1.13 | 0.756 | 0.872 | 0.118 | 0.737 | 0.302 |
 
-Six datasets the models never saw during training (intents, question types, paraphrase, spam,
-app-store stars, subjectivity; 307 items):
+Six datasets not used in training (intents, question types, paraphrase, spam, app-store stars,
+subjectivity; 307 items):
 
 | | accuracy | confidence | ECE | NLL | Brier |
 |---|---|---|---|---|---|
@@ -181,82 +171,71 @@ app-store stars, subjectivity; 307 items):
 | E4B jevified | 0.844 | 0.849 | 0.043 | 0.435 | 0.237 |
 | 26B raw | 0.847 | 0.986 | 0.142 | 1.846 | 0.285 |
 | 26B jevified | 0.834 | 0.875 | 0.061 | 0.450 | 0.241 |
+| Jev 1.13 | 0.866 | 0.879 | 0.037 | 0.387 | 0.197 |
 
-Stated confidence now matches accuracy, and accuracy went up too. The training was text only, but
-it carried over to images: on CIFAR-10 and Food-101 the 26B goes from 0.999 confidence to 0.93 at
-98% accuracy.
+On the training distribution the jevified models beat Jev on every metric. On unseen datasets Jev is
+ahead by 2 to 3 accuracy points and on NLL; the gap is concentrated in paraphrase detection (PAWS),
+where our models score 0.54 to 0.58 against Jev's 0.86. On the other five datasets they are even.
+
+Training used text only. On CIFAR-10 and Food-101 images the 26B moved from 0.999 to 0.93
+confidence at 98% accuracy. Jev does not take images.
 
 ## Models
 
-| model | size | runs on | weights | adapter |
+| model | params | memory (bf16) | runs on | adapter |
 |---|---|---|---|---|
-| jevify-gemma4-e4b | 8B (bf16 16 GB) | one GPU, or a 24 GB Mac via MPS | [kushalpatil/jevify-gemma4-e4b](https://huggingface.co/kushalpatil/jevify-gemma4-e4b) | [-lora](https://huggingface.co/kushalpatil/jevify-gemma4-e4b-lora) |
-| jevify-gemma4-26b-a4b | 26B MoE, 4B active (bf16 52 GB) | one 80 GB GPU | [kushalpatil/jevify-gemma4-26b-a4b](https://huggingface.co/kushalpatil/jevify-gemma4-26b-a4b) | [-lora](https://huggingface.co/kushalpatil/jevify-gemma4-26b-a4b-lora) |
+| [jevify-gemma4-e4b](https://huggingface.co/kushalpatil/jevify-gemma4-e4b) | 8B | 16 GB | one GPU, or a 24 GB Mac | [lora](https://huggingface.co/kushalpatil/jevify-gemma4-e4b-lora) |
+| [jevify-gemma4-26b-a4b](https://huggingface.co/kushalpatil/jevify-gemma4-26b-a4b) | 26B MoE, 4B active | 52 GB | one 80 GB GPU | [lora](https://huggingface.co/kushalpatil/jevify-gemma4-26b-a4b-lora) |
 
-The merged weights load with transformers or vLLM like the base models. The adapters are 140 to
-180 MB if you already have the base weights. Both stay multimodal.
+Merged weights load with transformers or vLLM. Adapters are 140 to 180 MB.
 
 ## Train your own
 
-Everything we used is in `train/`. Public data only, no API calls.
-
 ```bash
 uv sync --extra train
-uv run python train/build_dataset.py --out data/jevify_calib.jsonl        # ~47k rows from 16 sources
-uv run python train/build_heldout.py --out data/heldout.jsonl             # 6 unseen sources for eval
+uv run python train/build_dataset.py --out data/jevify_calib.jsonl        # 47k rows, 16 sources
+uv run python train/build_heldout.py --out data/heldout.jsonl             # 6 unseen sources
 CUDA_VISIBLE_DEVICES=0 uv run python train/train_lora.py --model google/gemma-4-E4B-it \
     --data data/jevify_calib.jsonl --out runs/e4b --epochs 2 --max-len 32768 --merge
 uv run python train/eval.py --data data/heldout.jsonl --backend transformers --model runs/e4b/merged
 uv run python train/export.py --base google/gemma-4-E4B-it --adapter runs/e4b/adapter_best --repo you/your-model
 ```
 
-The E4B trains in about 3 hours on one B200, the 26B in about 5. Any causal LM on Hugging Face
-works as the base.
-
-Your own rows go in the same file. One JSON object per line; the question is in Jev's format and
-the target is keyed like Jevify's answers:
+E4B trains in 3 hours on one B200, the 26B in 5. Any causal LM on Hugging Face works as the base.
+Add your own rows to the same file, one JSON object per line:
 
 ```json
 {"state": "...", "question": {"type": "choice", "instructions": "...", "criteria": {"a": "...", "b": null}}, "target": {"a": 0.8, "b": 0.2}, "split": "train", "source": "mine"}
 ```
 
-We did one straightforward run and the numbers moved a lot. There is room, and most of it is in the
-data and the recipe, not in the code. Things we would try next, in order:
+Untried changes that should help, in order:
 
-1. Add paraphrase and NLI style pairs. Our models lose the most on PAWS, where two sentences differ
-   by a word or two. That is the one task where the label depends on reading carefully rather than
-   recognizing a category.
-2. Train for one epoch, not two. Checkpoints from early in the run scored slightly better on the
-   unseen datasets than the final ones.
+1. Paraphrase and NLI pairs. The models lose most on PAWS, where two sentences differ by a word.
+2. One epoch. Early checkpoints scored slightly better on the unseen datasets than the final ones.
 3. Lower learning rate for the 26B. Its gradient norms were spiky at 1e-4.
-4. A few hundred rows of your own questions. Generic calibration gets you to "0.8 means about 80%
-   on average". Rows from your own distribution get you there for your questions specifically.
-5. Pack several questions per state during training with the same tree mask used at inference.
-   The long-state examples would cost a fraction of what they cost now.
-6. A bigger base model.
+4. A few hundred rows from your own task. Generic calibration gives "0.8 means about 80%" on
+   average; your rows give it for your questions.
+5. Several questions per state per training step, using the batched forward from inference.
+
+Details of each script and data source: [train/README.md](train/README.md).
 
 ## Serving
 
-The default is in-process transformers. For throughput, run the Hugging Face model under vLLM or
-SGLang and point Jevify at it:
+Default is in-process transformers. For throughput, run the model under vLLM or SGLang:
 
 ```bash
 jevify serve --backend openai --runtime vllm --model kushalpatil/jevify-gemma4-26b-a4b --concurrency 8
 ```
 
-Any OpenAI-compatible server that returns `logprobs` works this way (`vllm`, `sglang`, `llamacpp`,
-`lmstudio`, `ollama`, `mlx`). Server backends only see the top 20 logprobs per position, so an option
-whose label falls outside the top 20 gets probability 0. That does not happen below about 15
-options. The transformers backend has no such cap.
+Any OpenAI-compatible server that returns `logprobs` works (`vllm`, `sglang`, `llamacpp`,
+`lmstudio`, `ollama`, `mlx`). Servers expose the top 20 logprobs, so an option outside the top 20
+gets probability 0; this does not happen below about 15 options.
 
 ## Limits
 
-- The probabilities are good on average. For one specific task, a few hundred of your own labeled
-  rows will do better than the generic model.
-- Reasoning/thinking mode is turned off. The trick reads the first token, and a thinking model's
-  first token is `<think>`.
-- Up to 26 options per `choice` (letters), 2 to 10 levels per `score`.
-- We evaluated on English text and a couple of image benchmarks. Other languages should work but
-  we did not measure them.
+- Probabilities are calibrated on average. For one task, a few hundred of your own rows do better.
+- Thinking mode is off. The method reads the first token, and a thinking model's first token is `<think>`.
+- Up to 26 options per `choice`, 2 to 10 levels per `score`.
+- Evaluated on English text and two image benchmarks.
 
-MIT license. The models are released under the Gemma terms of use.
+MIT. Models are under the Gemma terms of use.
