@@ -5,11 +5,16 @@ Two ways to answer N questions about one state, both prefill the state exactly o
 * `next_token(messages)` — llama.cpp-style prompt cache: the KV cache of the previous prompt is
   kept and, if the new prompt shares a token prefix with it, only the differing suffix is run.
 
-* `next_token_batch(list_of_messages)` — **one packed forward pass** for all questions ("tree
-  attention"). The shared token prefix P is (re)used from the cache; every question suffix S_i
-  is concatenated into a single sequence and a custom 4D attention mask lets S_i attend to
-  P + itself only, never to S_j. Positions restart at |P| for every branch, so each branch is
-  numerically the same computation as running it alone — just fused into one kernel launch.
+* `next_token_batch(list_of_messages)` — all questions in **one forward pass**. The shared token
+  prefix P is (re)used from the cache, then one of two ways to run the question suffixes S_i:
+
+  - batched branches (default): copy P's KV cache N times along the batch dimension and run the
+    N suffixes as N rows. Plain causal masks, so it is exact for every architecture (including
+    sliding-window models like Gemma). Costs N copies of the prefix KV, so it is used while
+    that fits in `max_branch_kv_gb`.
+  - packed tree attention (`packed=True`, full-attention models only): concatenate the suffixes
+    into a single row with a 4D mask so S_i attends to P + itself, never S_j. One shared copy
+    of the prefix, so it scales to very long states.
 
         kv:      P P P P | S1 S1 | S2 S2 S2 | S3
         S1 rows: 1 1 1 1 | causal|   0      | 0
@@ -68,7 +73,8 @@ class TransformersBackend:
         no_think: bool = True,
         min_shared_prefix: int = 16,
         prefill_chunk: int = 2048,
-        packed: bool = True,
+        packed: bool | None = None,
+        max_branch_kv_gb: float = 24.0,
         **from_pretrained_kwargs,
     ):
         import torch
@@ -81,17 +87,14 @@ class TransformersBackend:
         self.no_think = no_think
         self.min_shared_prefix = min_shared_prefix
         self.prefill_chunk = prefill_chunk
-        self.packed = packed
+        self.max_branch_kv_gb = max_branch_kv_gb
         self.device = device or ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         self.tokenizer = AutoTokenizer.from_pretrained(model)
         self._processor = None  # loaded on first image request (multimodal bases only)
         from_pretrained_kwargs.setdefault("attn_implementation", "sdpa")  # custom 4D bool masks need sdpa/eager
         self.lm = AutoModelForCausalLM.from_pretrained(model, dtype=dtype, **from_pretrained_kwargs).to(self.device).eval()
-        if self.packed and not supports_packed(self.lm.config):
-            import warnings
-
-            warnings.warn(f"{model}: sliding-window attention layers -> packed multi-question forward disabled (sequential prefix-cache path is exact)", stacklevel=2)
-            self.packed = False
+        # tree-mask packing is only exact on full-attention models; batched branches work everywhere
+        self.packed = supports_packed(self.lm.config) if packed is None else bool(packed)
         self._prefix_ids: list[int] = []  # tokens currently held in self._cache
         self._cache = None
 
@@ -184,10 +187,58 @@ class TransformersBackend:
             table = self._table(torch.log_softmax(out.logits[0, -1].float(), dim=-1))
         return NextToken(logprobs=table, prompt_tokens=len(ids), cached_tokens=shared, extra={"device": self.device, "mode": "sequential"})
 
-    # -- all questions in ONE forward pass (tree attention) ---------------------------
+    # -- all questions in ONE forward pass --------------------------------------------
+    def _prefix_kv_bytes(self) -> int:
+        total = 0
+        for layer in getattr(self._cache, "layers", []):
+            for t in (getattr(layer, "keys", None), getattr(layer, "values", None)):
+                if t is not None and hasattr(t, "numel"):
+                    total += t.numel() * t.element_size()
+        return total
+
     def next_token_batch(self, batch: list[list[dict[str, str]]]) -> list[NextToken]:
-        if not self.packed or len(batch) == 1 or any(_has_images(m) for m in batch):
+        if len(batch) == 1 or any(_has_images(m) for m in batch):
             return [self.next_token(m) for m in batch]
+        if self.packed:
+            return self._next_token_batch_packed(batch)
+        return self._next_token_batch_branches(batch)
+
+    def _next_token_batch_branches(self, batch: list[list[dict[str, str]]]) -> list[NextToken]:
+        """Prefill the shared prefix once, copy its KV N times, run the N question suffixes as a batch."""
+        import copy
+
+        torch = self.torch
+        ids = [self.encode(m) for m in batch]
+        p_len = min(_common_prefix_len(ids), min(len(s) for s in ids) - 1)
+        prefix = ids[0][:p_len]
+        suffixes = [s[p_len:] for s in ids]
+        n = len(batch)
+        with torch.inference_mode():
+            self._ensure_prefix(prefix)
+            if n * self._prefix_kv_bytes() > self.max_branch_kv_gb * 1e9:  # too big to copy -> one at a time
+                return [self.next_token(m) for m in batch]
+            L = max(len(s) for s in suffixes)
+            pad = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else 0
+            inp = torch.full((n, L), pad, dtype=torch.long)
+            mask = torch.zeros((n, p_len + L), dtype=torch.long)
+            mask[:, :p_len] = 1
+            for r, s_ in enumerate(suffixes):  # right pad; gather each row's last real token below
+                inp[r, : len(s_)] = torch.tensor(s_)
+                mask[r, p_len : p_len + len(s_)] = 1
+            cache = copy.deepcopy(self._cache)  # keep the clean prefix cache for the next call
+            cache.batch_repeat_interleave(n)
+            out = self.lm(input_ids=inp.to(self.device), attention_mask=mask.to(self.device), past_key_values=cache, use_cache=True)
+            last = torch.tensor([len(s_) - 1 for s_ in suffixes], device=self.device)
+            logits = out.logits[torch.arange(n, device=self.device), last].float()
+            logprobs = torch.log_softmax(logits, dim=-1)
+            tables = [self._table(logprobs[i]) for i in range(n)]
+            del cache, out
+        return [
+            NextToken(logprobs=t, prompt_tokens=len(s), cached_tokens=p_len, extra={"device": self.device, "mode": "branches"})
+            for t, s in zip(tables, ids)
+        ]
+
+    def _next_token_batch_packed(self, batch: list[list[dict[str, str]]]) -> list[NextToken]:
         torch = self.torch
         ids = [self.encode(m) for m in batch]
         p_len = min(_common_prefix_len(ids), min(len(s) for s in ids) - 1)  # every branch keeps >= 1 token

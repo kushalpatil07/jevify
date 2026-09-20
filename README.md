@@ -95,34 +95,37 @@ letters for each level, and the score is the expected level index. Confidence is
 normalized entropy of the distribution. `output_tokens` is always 0.
 
 When you ask several questions about one state, the state is only processed once. The
-transformers backend keeps the state's KV cache and runs each question's few dozen tokens on top
-of it. On models without sliding-window attention it goes one step further and packs all the
-questions into a single forward pass with a tree-shaped attention mask, so every question sees the
-state and itself but not the other questions:
+transformers backend prefills the state, keeps its KV cache, copies that cache once per question
+along the batch dimension, and runs all the question suffixes as one batched forward pass. Each row
+is "state + its question", so it is the same computation as asking one question at a time (we check
+that: in float32 the probabilities match to the last digit), just done together. Ten questions cost
+about one and a half questions:
 
 ```
-                STATE      Q1     Q2     Q3
-      STATE     causal
-      Q1        ■■■■■■   causal
-      Q2        ■■■■■■           causal
-      Q3        ■■■■■■                  causal
+                        STATE  ──────►  KV cache (computed once)
+                                           │  copied N times
+                        row 1:  [ cache ] + Q1  ─┐
+                        row 2:  [ cache ] + Q2  ─┼─►  one forward  ─►  N answers
+                        row 3:  [ cache ] + Q3  ─┘
 ```
 
-This gives the same numbers as asking the questions one at a time (we test that), it is just one
-kernel launch instead of N. Server backends (vLLM, llama.cpp, ...) get the same effect from their
-own prompt cache.
+For very long states, where N copies of the cache would not fit, models with full attention can
+instead pack the questions into one row with a tree-shaped mask (each question sees the state and
+itself, one shared copy of the cache). Server backends (vLLM, llama.cpp, ...) get the same effect
+from their own prompt cache when you send the questions concurrently.
 
-Speed, measured on one B200 with plain Hugging Face transformers, no compilation, 1,700-token state:
+Speed, measured on one B200 with plain Hugging Face transformers, no compilation, 1,700-token state
+already cached:
 
 | | 1 question | 3 questions | 10 questions |
 |---|---|---|---|
-| jevify-gemma4-e4b | 51 ms | 134 ms | 423 ms |
-| jevify-gemma4-26b-a4b | 88 ms | 219 ms | 658 ms |
+| jevify-gemma4-e4b | 40 ms | 48 ms | 76 ms |
+| jevify-gemma4-26b-a4b | 61 ms | 72 ms | 112 ms |
 
-About 40 ms per question on the E4B and 60 ms on the 26B after the state is cached. That is the
-Python overhead floor of eager transformers, not the GPU; vLLM or `torch.compile` would cut it
-further. On a 24 GB M-series Mac (MPS) the E4B takes about 4.5 s to prefill the same state and then
-0.3 s per question.
+Prefilling the 1,700-token state the first time adds about 10 ms on the E4B and 25 ms on the 26B.
+The 40 ms floor is Python overhead in eager transformers, not the GPU; vLLM or `torch.compile`
+would cut it. On a 24 GB M-series Mac (MPS) the E4B takes about 4.5 s to prefill the same state and
+then 0.3 s for a question.
 
 Because the model is just doing a normal forward pass, everything the base model supports still
 works. Gemma 4 E4B takes 128k tokens of state, the 26B takes 256k. Both have a vision tower, so an
