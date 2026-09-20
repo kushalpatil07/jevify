@@ -14,7 +14,7 @@
   #stage { position:relative; flex:1 1 auto; min-height:0; width:min(92vw, 760px); background:#000; border-radius:18px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.6); }
   #stage video { width:100%; height:100%; object-fit:cover; display:block; }
   #stage img { width:100%; height:100%; object-fit:contain; display:block; background:#000; }
-  #stage.scanning img, #stage.scanning video { filter:brightness(.55); }
+  #stage.scanning img, #stage.scanning video { filter:brightness(.9); }
   #scan { position:absolute; inset:0; pointer-events:none; display:none; align-items:center; justify-content:center; }
   #stage.scanning #scan { display:flex; }
   .ring { position:absolute; border-radius:50%; border:4px dotted #a259ff; box-shadow:0 0 14px rgba(162,89,255,.55); }
@@ -125,6 +125,7 @@ fetch("/api/samples").then(r => r.json()).then(names => {
       document.querySelectorAll("#samples img").forEach(x => x.classList.remove("sel")); im.classList.add("sel");
       stopLive(); if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; video.hidden = true; }
       photo.src = im.src; photo.hidden = false; $("drop").hidden = true;
+      await photo.decode().catch(() => {});
       classify(await (await fetch(im.src)).blob());
     };
     $("samples").appendChild(im);
@@ -135,7 +136,7 @@ $("file").onchange = e => {
   const f = e.target.files[0]; if (!f) return;
   stopLive(); if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; video.hidden = true; }
   photo.src = URL.createObjectURL(f); photo.hidden = false; $("drop").hidden = true;
-  classify(f);
+  photo.decode().catch(() => {}).then(() => classify(f));
 };
 document.body.addEventListener("dragover", e => e.preventDefault());
 document.body.addEventListener("drop", e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { $("file").files = e.dataTransfer.files; $("file").onchange({ target: { files: [f] } }); } });
